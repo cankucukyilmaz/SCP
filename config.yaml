@@ -1,0 +1,27 @@
+# Data Splitting
+input_dir: "input"
+output_dir: "split_data"
+train_ratio: 0.8
+train_dir: "split_data/train"
+test_dir: "split_data/test"
+
+# Base Model
+learning_rate: 0.001
+
+# Transformer
+height: 224
+width: 224
+random_rotation_degrees: 40
+random_affine_degrees: 20
+random_translation: [0.1, 0.1]
+brightness: 0.1
+contrast: 0.1
+saturation: 0.1
+hue: 0.1
+
+# Training
+batch_size: 16
+epochs: 20
+
+# Evaluation
+topk: 3
