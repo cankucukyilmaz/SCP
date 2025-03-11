@@ -17,9 +17,9 @@ warnings.filterwarnings("ignore")
 config = load_config("config.yaml")
 
 def preprocess():
-    mean, std = compute_mean_std(config["train_dir"])
+    mean, std = compute_mean_std(config["input_dir"])  # Compute from full dataset
 
-    train_transformer, test_transformer = create_transformers(
+    transformer = create_transformers(
         mean,
         std,
         config["height"],
@@ -31,134 +31,63 @@ def preprocess():
         config["contrast"],
         config["saturation"],
         config["hue"]
-    )
+    )[0]  # Only need train_transformer
 
-    train_data = ImageFolder(config["train_dir"], transform=train_transformer)
-    test_data = ImageFolder(config["test_dir"], transform=test_transformer)
+    dataset = ImageFolder(config["input_dir"], transform=transformer)
+    data_loader = DataLoader(dataset, batch_size=config["batch_size"], shuffle=True, pin_memory=True)
 
-    train_loader = DataLoader(train_data, batch_size=config["batch_size"], shuffle=True, pin_memory=True)
-    test_loader = DataLoader(test_data, batch_size=config["batch_size"], shuffle=False, pin_memory=True)
+    return data_loader
 
-    return train_loader, test_loader
-
-def topk_accuracy(output, target, k=config["topk"]):
-    with torch.no_grad():
-        _, pred = output.topk(k, dim=1, largest=True, sorted=True)
-        correct = pred.eq(target.view(-1, 1).expand_as(pred))
-        return correct.any(dim=1).float().mean().item()
-
-def train(model, device, train_loader, optimizer, criterion, epoch):
+def train(model, device, data_loader, optimizer, criterion, epochs):
     model.train()
-    pbar = tqdm(train_loader)
-    
-    correct = 0
-    processed = 0
-    total_loss = 0
-    topk_correct = 0
 
-    for batch_idx, (data, target) in enumerate(pbar):
-        data, target = data.to(device), target.to(device)
-        optimizer.zero_grad()
-        y_pred = model(data)
-        loss = criterion(y_pred, target)
+    for epoch in range(epochs):
+        print(f"EPOCH {epoch+1}/{epochs}")
+        pbar = tqdm(data_loader)
 
-        loss.backward()
-        optimizer.step()
+        total_loss = 0
+        correct = 0
+        processed = 0
 
-        total_loss += loss.item()
-        pred = y_pred.argmax(dim=1, keepdim=True)
-        correct += pred.eq(target.view_as(pred)).sum().item()
-        processed += len(data)
-
-        topk_correct += topk_accuracy(y_pred, target, k=config["topk"]) * len(data)
-
-        pbar.set_description(desc=f'Loss={loss.item():.4f} Batch={batch_idx} Accuracy={100 * correct / processed:.2f}%')
-
-    epoch_train_loss = total_loss / len(train_loader)
-    epoch_train_acc = 100 * correct / processed
-    epoch_topk_acc = 100 * topk_correct / processed
-
-    train_losses.append(epoch_train_loss)
-    train_acc.append(epoch_train_acc)
-    train_topk_acc.append(epoch_topk_acc)
-
-    print(f'Epoch {epoch+1}: Loss={epoch_train_loss:.4f}, Accuracy={epoch_train_acc:.2f}%, Top-{config["topk"]} Accuracy={epoch_topk_acc:.2f}%')
-
-def test(model, device, test_loader, criterion):
-    model.eval()
-    test_loss = 0
-    correct = 0
-    topk_correct = 0
-    with torch.no_grad():
-        for data, target in test_loader:
+        for batch_idx, (data, target) in enumerate(pbar):
             data, target = data.to(device), target.to(device)
-            output = model(data)
-            test_loss += criterion(output, target).item()
-            pred = output.argmax(dim=1, keepdim=True)
+            optimizer.zero_grad()
+            y_pred = model(data)
+            loss = criterion(y_pred, target)
+
+            loss.backward()
+            optimizer.step()
+
+            total_loss += loss.item()
+            pred = y_pred.argmax(dim=1, keepdim=True)
             correct += pred.eq(target.view_as(pred)).sum().item()
-            topk_correct += topk_accuracy(output, target, k=config["topk"]) * len(data)
+            processed += len(data)
 
-    test_loss /= len(test_loader.dataset)
-    test_losses.append(test_loss)
-    test_acc.append(100. * correct / len(test_loader.dataset))
-    test_topk_acc.append(100. * topk_correct / len(test_loader.dataset))
+            pbar.set_description(desc=f'Loss={loss.item():.4f} Batch={batch_idx} Accuracy={100 * correct / processed:.2f}%')
 
-    print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.2f}%), Top-{} Accuracy: {:.2f}%\n'.format(
-        test_loss, correct, len(test_loader.dataset),
-        100. * correct / len(test_loader.dataset), config["topk"],
-        100. * topk_correct / len(test_loader.dataset)
-    ))
+        epoch_loss = total_loss / len(data_loader)
+        epoch_acc = 100 * correct / processed
 
-def save_plots(train_losses, train_acc, test_losses, test_acc, train_topk_acc, test_topk_acc, topk):
-    os.makedirs("plots", exist_ok=True)
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    plot_path = os.path.join("plots", f"training_results_{timestamp}.png")
-    
-    fig, axs = plt.subplots(3, 1, figsize=(10, 15))
-    
-    axs[0].plot(train_losses, label='Train Loss', color='green')
-    axs[0].plot(test_losses, label='Test Loss', color='red')
-    axs[0].set_title("Loss")
-    axs[0].legend()
-    
-    axs[1].plot(train_acc, label='Train Accuracy', color='green')
-    axs[1].plot(test_acc, label='Test Accuracy', color='red')
-    axs[1].set_title("Accuracy")
-    axs[1].legend()
-    
-    axs[2].plot(train_topk_acc, label=f'Train Top-{topk} Accuracy', color='blue')
-    axs[2].plot(test_topk_acc, label=f'Test Top-{topk} Accuracy', color='purple')
-    axs[2].set_title(f"Top-{topk} Accuracy")
-    axs[2].legend()
-    
-    plt.tight_layout()
-    plt.savefig(plot_path)
-    plt.show()
-    print(f"Plots saved to {plot_path}")
+        print(f'Epoch {epoch+1}: Loss={epoch_loss:.4f}, Accuracy={epoch_acc:.2f}%')
+
+    return model
 
 if __name__ == "__main__":
-    train_loader, test_loader = preprocess()
-
-    train_losses = []
-    test_losses = []
-    train_acc = []
-    test_acc = []
-    train_topk_acc = []
-    test_topk_acc = []
+    data_loader = preprocess()
 
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
-    
+
     model = ResNet18().to(device)
     optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
     criterion = nn.CrossEntropyLoss()
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=6, gamma=0.5)
 
-    for epoch in range(config["epochs"]):
-        print("EPOCH: ", epoch)
-        train(model, device, train_loader, optimizer, criterion, epoch)
-        scheduler.step()
-        print('Current Learning Rate: ', optimizer.state_dict()["param_groups"][0]["lr"])
-        test(model, device, test_loader, criterion)
+    # Train on full dataset
+    trained_model = train(model, device, data_loader, optimizer, criterion, config["epochs"])
 
-    save_plots(train_losses, train_acc, test_losses, test_acc, train_topk_acc, test_topk_acc, config["topk"])
+    # Save final model
+    os.makedirs("models", exist_ok=True)
+    final_model_path = "models/final_model.pth"
+    torch.save(trained_model.state_dict(), final_model_path)
+    print(f"Final model saved at {final_model_path}")
