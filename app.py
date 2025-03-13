@@ -1,3 +1,7 @@
+import os
+import sys
+sys.path.append(os.path.abspath(os.path.dirname(__file__)))
+
 from src.model import *
 from src.data_loader import *
 from src.utils import *
