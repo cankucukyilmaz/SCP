@@ -15,6 +15,8 @@ import datetime
 import os
 import matplotlib.pyplot as plt
 import warnings
+import json
+import yaml
 
 warnings.filterwarnings("ignore")
 
@@ -42,7 +44,7 @@ def mean_std(dataset):
 def objective(trial):
     config = load_config("config.yaml")
 
-    lr = trial.suggest_float("lr", 1e-5, 1e-1, log=True)
+    lr = trial.suggest_float("lr", 1e-2, 1e-1, log=True)
     batch_size = trial.suggest_categorical("batch_size", [16, 32, 64])
     step_size = trial.suggest_int("step_size", 3, 10)
     gamma = trial.suggest_float("gamma", 0.1, 0.9)
@@ -169,7 +171,30 @@ def save_plots(train_losses, train_acc, val_losses, val_acc):
     plt.close()
     print(f"Plots saved at {plot_path}")
 
+def save_hyperparameters(best_params, file_path="best_hyperparameters.json"):
+    """
+    Save the best hyperparameters to a file in JSON or YAML format.
+    
+    Args:
+        best_params (dict): Dictionary containing the best hyperparameters.
+        file_path (str): Path to save the file. Default is "best_hyperparameters.json".
+    """
+    # Determine the file format based on the file extension
+    if file_path.endswith(".json"):
+        with open(file_path, "w") as f:
+            json.dump(best_params, f, indent=4)
+    elif file_path.endswith(".yaml") or file_path.endswith(".yml"):
+        with open(file_path, "w") as f:
+            yaml.dump(best_params, f, default_flow_style=False)
+    else:
+        raise ValueError("Unsupported file format. Use .json or .yaml/.yml.")
+    
+    print(f"Best hyperparameters saved to {file_path}")
+
 if __name__ == "__main__":
     study = optuna.create_study(direction="maximize")
     study.optimize(objective, n_trials=20)
-    print("Best hyperparameters: ", study.best_params)
+    best_params = study.best_params
+    print("Best hyperparameters: ", best_params)
+    save_hyperparameters(best_params, "best_hyperparameters.json")
+
