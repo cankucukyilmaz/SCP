@@ -1,75 +1,120 @@
-import os
-import sys
-sys.path.append(os.path.abspath(os.path.dirname(__file__)))
-
-from src.model import *
 from src.data_loader import *
+from src.model import *
 from src.utils import *
 
+from flask import Flask, request, jsonify, send_from_directory
 import torch
 import torch.nn.functional as F
-from flask import Flask, request, jsonify
 from torchvision import transforms
 from PIL import Image
 import io
+import os
 
 config = load_config("config.yaml")
 
+# Initialize Flask app
 app = Flask(__name__)
 
-def load_model(model_path):
-    model = ResNet18(num_classes=10)  # Update num_classes if your dataset has a different number of classes
-    model.load_state_dict(torch.load(model_path))
-    model.eval()
-    return model
-
-model1 = load_model('models/model1.pth')
-model2 = load_model('models/model2.pth')
-model3 = load_model('models/model3.pth')
-
-mean, std = compute_mean_std(config["input_dir"])
+# Define image transformations
+mean = [0.539342462170622, 0.4856492361751947, 0.43324973198145483]
+std = [0.2270848481387292, 0.22017275884417153, 0.22362268174675773]
 
 transform = transforms.Compose([
-    transforms.Resize((config["height"], config["width"])),  # Match the input size of the model
-    transforms.ToTensor(),
-    transforms.Normalize(mean=mean, std=std),  # Pre-trained ResNet normalization
+    transforms.Resize((config["height"], config["width"])),  # Resize to model input size
+    transforms.ToTensor(),  # Convert image to tensor
+    transforms.Normalize(mean=mean, std=std),  # Normalize using dataset statistics
 ])
+
+# Load the model
+def load_model(model_path, device):
+    """
+    Load a pre-trained model from the specified path.
+    """
+    print(f"Loading model from: {model_path}")
+
+    # Ensure the model file exists
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f"Model file not found at: {model_path}")
+
+    # Load the model checkpoint
+    checkpoint = torch.load(model_path, map_location=device)
+    model = ResNet18().to(device)  # Initialize the model
+    model.load_state_dict(checkpoint['model_state_dict'])  # Load model weights
+    model.eval()  # Set the model to evaluation mode
+
+    print("Model loaded successfully.")
+    return model
+
+# Set device (GPU if available, otherwise CPU)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
+
+# Load the model
+model_path = "saved_models/resnet18_20250320_180043.pth"
+try:
+    model = load_model(model_path, device)
+except Exception as e:
+    print(f"Error loading model: {e}")
+    raise
+
+@app.route('/')
+def home():
+    return send_from_directory('.', 'index.html')
 
 @app.route('/predict', methods=['POST'])
 def predict():
+    """
+    Handle image uploads and return predictions.
+    """
+    # Check if a file is included in the request
     if 'file' not in request.files:
         return jsonify({'error': 'No file part'}), 400
 
     file = request.files['file']
+
+    # Check if a file is selected
     if file.filename == '':
         return jsonify({'error': 'No selected file'}), 400
 
     try:
-        # Open the image and apply transformations
-        img = Image.open(io.BytesIO(file.read()))
-        img = transform(img).unsqueeze(0)
+        # Read the image file
+        img_bytes = file.read()
+        img = Image.open(io.BytesIO(img_bytes))
 
-        # Get predictions from all models
+        # Apply transformations and prepare the image for the model
+        img = transform(img).unsqueeze(0).to(device)  # Add batch dimension and move to device
+
+        # Get predictions from the model
         with torch.no_grad():
-            output1 = model1(img)
-            output2 = model2(img)
-            output3 = model3(img)
+            output = model(img)
 
         # Convert logits to probabilities
-        prob_output1 = F.softmax(output1, dim=1)
-        prob_output2 = F.softmax(output2, dim=1)
-        prob_output3 = F.softmax(output3, dim=1)
+        probabilities = F.softmax(output, dim=1).squeeze()  # Remove batch dimension
 
-        # Average the probabilities
-        avg_probabilities = (prob_output1 + prob_output2 + prob_output3) / 3
+        # Get the top 3 predictions
+        top_probs, top_indices = torch.topk(probabilities, 3)  # Get top 3 probabilities and their indices
+        top_probs = top_probs.tolist()  # Convert to list
+        top_indices = top_indices.tolist()  # Convert to list
 
-        # Get the final prediction (class with highest probability)
-        final_prediction = avg_probabilities.argmax(dim=1).item()
+        # Map indices to labels
+        top_labels = [config["classes"][i] for i in top_indices]
 
-        return jsonify({'predicted_class': final_prediction, 'probabilities': avg_probabilities.tolist()})
+        # Combine probabilities and labels
+        top_predictions = [
+            {"label": label, "probability": round(prob * 100, 2)}
+            for label, prob in zip(top_labels, top_probs)
+        ]
+
+        # Return the result as JSON
+        return jsonify({
+            'predictions': top_predictions
+        })
 
     except Exception as e:
+        # Log the error and return a 500 response
+        print(f"Error during prediction: {e}")
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    # Run the Flask app
+    app.run(debug=True, host='0.0.0.0', port=5001)

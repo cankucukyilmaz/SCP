@@ -141,6 +141,20 @@ def save_plots(train_losses, train_acc, test_losses, test_acc, train_topk_acc, t
     plt.show()
     print(f"Plots saved to {plot_path}")
 
+def save_model(model, config, hyperparams):
+    os.makedirs("saved_models", exist_ok=True)
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    model_name = f"resnet18_{timestamp}.pth"
+    model_path = os.path.join("saved_models", model_name)
+    
+    torch.save({
+        'model_state_dict': model.state_dict(),
+        'config': config,
+        'hyperparams': hyperparams
+    }, model_path)
+    
+    print(f"Model saved to {model_path}")
+
 if __name__ == "__main__":
     hyperparams = load_hyperparameters("best_hyperparameters.json")
 
@@ -203,3 +217,4 @@ if __name__ == "__main__":
         test(model, device, test_loader, criterion, config)
 
     save_plots(train_losses, train_acc, test_losses, test_acc, train_topk_acc, test_topk_acc, config["topk"])
+    save_model(model, config, hyperparams)

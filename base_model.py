@@ -150,7 +150,7 @@ if __name__ == "__main__":
     device = torch.device("cuda" if use_cuda else "cpu")
     
     model = ResNet18().to(device)
-    optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
+    optimizer = optim.SGD(model.parameters(), lr=config["learning_rate"], momentum=config["momentum"])
     criterion = nn.CrossEntropyLoss()
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=6, gamma=0.5)
 

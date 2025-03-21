@@ -6,7 +6,8 @@ train_dir: "split_data/train"
 test_dir: "split_data/test"
 
 # Base Model
-learning_rate: 0.001
+learning_rate: 0.01
+momentum: 0.9
 
 # Transformer
 height: 224
@@ -25,3 +26,8 @@ epochs: 20
 
 # Evaluation
 topk: 3
+
+# Labels
+classes: ['bike', 'bottle', 'chair', 'cup', 'fork', 'knife', 'plant', 'shoe', 'spoon', 't-shirt']
+
+model_path: "saved_models/resnet18_20250320_180043.pth"
