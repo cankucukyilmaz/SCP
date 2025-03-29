@@ -1,27 +1,31 @@
-# Use an official PyTorch image as a base
+# Use official PyTorch image as base
 FROM pytorch/pytorch:latest
 
-# Set the working directory in the container
+# Set working directory
 WORKDIR /app
 
-# Copy the requirements file into the container
-COPY requirements.txt .
+# Copy only necessary files
+COPY SCP/app.py /app/app.py
+COPY SCP/index.html /app/index.html
+COPY SCP/src /app/src
+COPY SCP/saved_models /app/saved_models
+COPY SCP/requirements.txt /app/requirements.txt
 
-# Install the required Python dependencies
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    libgl1-mesa-glx \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the Flask app, saved_models, source code, configuration, and input directory
-COPY app.py .
-COPY saved_models/ ./saved_models
-COPY src/ ./src
-COPY config.yaml .
+# Expose the Flask app port
+EXPOSE 5001
 
-# Expose the port the app will run on
-EXPOSE 5000
-
-# Set the environment variable for Flask
+# Set environment variables
 ENV FLASK_APP=app.py
-ENV FLASK_ENV=production
+ENV FLASK_RUN_HOST=0.0.0.0
+ENV FLASK_RUN_PORT=5001
 
-# Run the Flask app
-CMD ["flask", "run", "--host=0.0.0.0", "--port=5000"]
+# Run the application
+CMD ["python", "app.py"]
